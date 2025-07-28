@@ -89,7 +89,7 @@ io.on("connection", (socket) => {
                   return
             }
 
-            //Emit an event to the reciever socket(caller)
+ //Emit an event to the reciever socket(caller)
             io.to(call.socketId).emit("callToUser",{
                   signal:data.signalData,
                   from:data.from,
@@ -104,7 +104,14 @@ io.on("connection", (socket) => {
                   signal:data.signal,
                   from:data.from
             });
-      });
+      }); 
+
+      socket.on("call-ended",(data)=>{
+            io.to(data.to).emit("callEnded",{
+                  name:data.name,
+                  
+            })
+      })
   
       socket.on("reject-call", (data) => {
             io.to(data.to).emit("callRejected",{

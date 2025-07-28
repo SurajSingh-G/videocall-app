@@ -1,12 +1,11 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState ,useRef } from 'react';
 import { useUser } from '../../context/UserContextApi.jsx';
 import { data, useNavigate } from 'react-router-dom';
-import { FaBars, FaDoorClosed, FaPhoneAlt, FaPhoneSlash, FaTimes } from 'react-icons/fa';
+import { FaBars, FaDoorClosed, FaMicrophone, FaMicrophoneSlash, FaPhoneAlt, FaPhoneSlash, FaTimes, FaVideo, FaVideoSlash } from 'react-icons/fa';
 import apiClient from '../../apiClient.js';
 import SocketContext from '../socket/SocketContext.jsx';
-import { useRef } from 'react';
 import Peer from 'simple-peer';
-
+import { RiLogoutBoxLine } from "react-icons/ri"
 
 function Dashboard() {
   const { user, updateUser } = useUser();
@@ -37,8 +36,13 @@ function Dashboard() {
   const [callRejectedPopUp, setCallRejectedPopUp] = useState(false);
   const [callRejectedUser, setCallRejectedUser] = useState(null);
 
+
+  // 🔹 State to track microphone & video status
+  const [isMicOn, setIsMicOn] = useState(true);
+  const [isCamOn, setIsCamOn] = useState(true);
+
   const socket = SocketContext.getSocket();
-  console.log(socket);
+  // console.log("your caller is:",user.username);
 
 
   useEffect(() => {
@@ -55,7 +59,13 @@ function Dashboard() {
     socket.on("callToUser", (data) => {
       setReciveingCall(true);
       setCaller(data);
+      
       setCallerSignal(data.signal);
+    })
+
+    socket.on("callEnded", (data) => {
+      console.log("call ended by ", data.name);
+      endCallCleanup();
     })
 
     socket.on("callRejected", (data) => {
@@ -66,6 +76,9 @@ function Dashboard() {
     return () => {
       socket.off("me");
       socket.off("online-users");
+      socket.off("callToUser");
+      socket.off("callEnded");
+      socket.off("callRejected");
     }
   }, [user, socket])
 
@@ -126,7 +139,7 @@ function Dashboard() {
         // Emit a "callToUser" event to the server with necessary call details
         socket.emit("callToUser", {
           callToUserId: showReciverDetails._id, // 
-          signalData:data,
+          signalData: data,
           from: me,
           name: user.username,
           email: user.email,
@@ -142,7 +155,7 @@ function Dashboard() {
         }
       })
 
-      socket.once("callAccepted" ,(data)=>{
+      socket.once("callAccepted", (data) => {
         setCallRejectedPopUp(false);
         setCallAccepted(true);
         setCaller(data.from);
@@ -159,63 +172,70 @@ function Dashboard() {
     }
   }
 
-const handelacceptCall = async () => {
-  try {
-    // Release any previous media stream
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-
-    const currentStream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true
+  const handelacceptCall = async () => {
+    try {
+      // Release any previous media stream
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
       }
-    });
 
-    setStream(currentStream);
-
-    if (myVideo.current) {
-      myVideo.current.srcObject = currentStream;
-    }
-
-    currentStream.getAudioTracks().forEach(track => (track.enabled = true));
-    setCallAccepted(true);
-    setReciveingCall(true);
-    setIsSidebarOpen(false);
-
-    const peer = new Peer({
-      initiator: false,
-      trickle: false,
-      stream: currentStream
-    });
-
-    peer.on("signal", (data) => {
-      socket.emit("answeredCall", {
-        signal: data,
-        from: me,
-        to: caller.from
+      const currentStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true
+        }
       });
-    });
 
-    peer.on("stream", (remoteStream) => {
-      if (reciverVideo.current) {
-        reciverVideo.current.srcObject = remoteStream;
-        reciverVideo.current.muted = false;
-        reciverVideo.current.volume = 1.0;
+      setStream(currentStream);
+
+      if (myVideo.current) {
+        myVideo.current.srcObject = currentStream;
       }
-    });
 
-    if (callerSignal) peer.signal(callerSignal);
-    connectionRef.current = peer;
+      currentStream.getAudioTracks().forEach(track => (track.enabled = true));
+      setCallAccepted(true);
+      setReciveingCall(true);
+      setIsSidebarOpen(false);
 
-  } catch (error) {
-    console.error("Error on sending media device:", error.name, error.message);
-    alert("Camera/mic not accessible. Please check if it's already being used by another app.");
+      const peer = new Peer({
+        initiator: false,
+        trickle: false,
+        stream: currentStream
+      });
+
+      peer.on("signal", (data) => {
+        socket.emit("answeredCall", {
+          signal: data,
+          from: me,
+          to: caller.from
+        });
+      });
+
+      peer.on("stream", (remoteStream) => {
+        if (reciverVideo.current) {
+          reciverVideo.current.srcObject = remoteStream;
+          reciverVideo.current.muted = false;
+          reciverVideo.current.volume = 1.0;
+        }
+      });
+
+      if (callerSignal) peer.signal(callerSignal);
+      connectionRef.current = peer;
+
+    } catch (error) {
+      console.error("Error on sending media device:", error.name, error.message);
+      alert("Camera/mic not accessible. Please check if it's already being used by another app.");
+    }
   }
-}
 
+  const handelendCall = () => {
+    socket.emit("call-ended", {
+      to: caller.from || selectedUser,
+      name: user.username
+    })
+    endCallCleanup();
+  }
 
   const handelrejectCall = () => {
     setReciveingCall(false);
@@ -225,6 +245,50 @@ const handelacceptCall = async () => {
       name: user.username,
       profilepic: user.profilepic
     })
+  }
+
+  // 🎤 Toggle Microphone
+  const toggleMic = () => {
+    if (stream) {
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !isMicOn;
+        setIsMicOn(audioTrack.enabled);
+      }
+    }
+  };
+
+  // toggle cam
+  const toggleCam = () => {
+    if (stream) {
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !isCamOn;
+        setIsCamOn(videoTrack.enabled);
+      }
+    }
+  };
+
+
+  const endCallCleanup = () => {
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+    if (reciverVideo.current) {
+      reciverVideo.current.srcObject = null;
+    }
+    if (myVideo.current) {
+      myVideo.current.srcObject = null;
+    }
+
+    connectionRef.current?.destroy();
+    setStream(null);
+    setReciveingCall(false);
+    setCallAccepted(false);
+    setSelectedUser(null);
+    setTimeout(() => {
+      window.location.reload();
+    }, 100)
   }
 
   const handleLogout = async () => {
@@ -324,7 +388,7 @@ const handelacceptCall = async () => {
           onClick={handleLogout}
           className="absolute bottom-2 left-4 right-4 flex items-center gap-2 bg-red-400 px-4 py-1 cursor-pointer rounded-lg"
         >
-          <FaDoorClosed />
+           <RiLogoutBoxLine />
           Logout
         </div>}
       </aside>
@@ -341,7 +405,7 @@ const handelacceptCall = async () => {
 
         {/* Welcome */}
         {selectedUser || reciveingCall || callAccepted ? (
-          <div> 
+          <div className='relative w-full h-full bg-black flex items-center justify-center'>
             <video
               ref={reciverVideo}
               autoPlay
@@ -355,7 +419,48 @@ const handelacceptCall = async () => {
                 className='w-32 h-40 md:w-55 md:h-52 object-cover rounded-lg '
               />
             </div>
-          </div>) : (
+
+            {/* Username + Sidebar Button */}
+            <div className="absolute top-4 left-4 text-white text-lg font-bold flex gap-2 items-center">
+
+              {caller?.username || "Caller"}
+
+            </div>
+
+            {/* Call Controls */}
+            <div className="absolute bottom-4 w-full flex justify-center gap-4">
+              <button
+                type="button"
+                className="bg-red-600 p-4 rounded-full text-white shadow-lg cursor-pointer"
+                onClick={handelendCall}
+              >
+                <FaPhoneSlash size={24} />
+              </button>
+              {/* 🎤 Toggle Mic */}
+              <button
+                type="button"
+                onClick={toggleMic}
+                className={`p-4 rounded-full text-white shadow-lg cursor-pointer transition-colors ${isMicOn ? "bg-green-600" : "bg-red-600"
+                  }`}
+              >
+                {isMicOn ? <FaMicrophone size={24} /> : <FaMicrophoneSlash size={24} />}
+              </button>
+
+              {/* 📹 Toggle Video */}
+              <button
+                type="button"
+                onClick={toggleCam}
+                className={`p-4 rounded-full text-white shadow-lg cursor-pointer transition-colors ${isCamOn ? "bg-green-600" : "bg-red-600"
+                  }`}
+              >
+                {isCamOn ? <FaVideo size={24} /> : <FaVideoSlash size={24} />}
+              </button>
+
+
+            </div>
+
+          </div>
+        ) : (
           <div>
             <div className="flex items-center gap-5 mb-6 bg-gray-800 p-5 rounded-xl shadow-md">
               <div className=" h-20 text-6xl">
@@ -436,7 +541,7 @@ const handelacceptCall = async () => {
                 alt="Caller"
                 className="w-20 h-20 rounded-full border-4 border-green-500"
               />
-              <h3 className="text-lg font-bold mt-3">{caller.name}</h3>
+              <h3 className="text-lg font-bold mt-3">{caller?.name}</h3>
               <p className="text-sm text-gray-500">{caller?.email}</p>
               <div className="flex gap-4 mt-5">
                 <button
@@ -458,7 +563,6 @@ const handelacceptCall = async () => {
           </div>
         </div>
       )}
-
       {callRejectedPopUp && (
         <div className="fixed inset-0 bg-transparent bg-opacity-30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
